@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>幾A幾B - 主持人控台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans h-screen flex flex-col relative overflow-hidden">
+
+    <!-- 頂部資訊區 -->
+    <header class="w-full p-6 flex justify-between items-center bg-gray-800 shadow-md">
+        <div>
+            <h1 class="text-3xl font-bold text-blue-400">幾A幾B 大螢幕</h1>
+            <p id="target-info" class="text-xl text-gray-400 mt-2">等待主持人設定題目...</p>
+        </div>
+        <!-- 結束這回合按鈕 -->
+        <button id="end-round-btn" class="hidden px-6 py-3 bg-red-600 hover:bg-red-700 font-bold rounded-lg shadow-lg transition">
+            結束這回合
+        </button>
+    </header>
+
+    <!-- 中間內容區 -->
+    <main class="flex-1 flex flex-col items-center justify-center p-6 w-full max-w-4xl mx-auto">
+        
+        <!-- 設定題目區 -->
+        <div id="setup-section" class="w-full bg-gray-800 p-8 rounded-xl shadow-2xl flex flex-col items-center">
+            <h2 class="text-3xl mb-6">設定本回合密碼 (1~20位數字)</h2>
+            <div class="flex w-full max-w-md space-x-4">
+                <!-- 使用 password 隱藏輸入 (顯示為*) -->
+                <input type="password" id="target-input" placeholder="輸入數字..." class="flex-1 px-4 py-3 text-2xl text-center text-black rounded-lg focus:outline-none" maxlength="20" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                <button id="confirm-btn" class="px-6 py-3 bg-green-500 hover:bg-green-600 font-bold rounded-lg text-xl transition">確認</button>
+            </div>
+        </div>
+
+        <!-- 排行榜區 (遊戲開始時顯示) -->
+        <div id="leaderboard-section" class="hidden w-full flex-col items-center mt-8">
+            <h2 class="text-4xl font-bold mb-8 text-yellow-400 tracking-widest">🏆 勝利排行榜 🏆</h2>
+            <div class="w-full max-w-2xl bg-gray-800 rounded-xl shadow-2xl p-6 min-h-[300px]">
+                <ul id="leaderboard-list" class="space-y-4">
+                    <!-- 排行榜動態插入於此 -->
+                    <li class="text-gray-400 text-center text-xl mt-10">等待玩家破解密碼...</li>
+                </ul>
+            </div>
+        </div>
+
+    </main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyC7PZLTTNf17cfp9gCHudWiWX8SYPSCdDI",
+            authDomain: "onlineeasyraygame.firebaseapp.com",
+            databaseURL: "https://onlineeasyraygame-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "onlineeasyraygame",
+            storageBucket: "onlineeasyraygame.firebasestorage.app",
+            messagingSenderId: "622138442346",
+            appId: "1:622138442346:web:02745ec52f0e83ad428013",
+            measurementId: "G-PZB26XW21J"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        const setupSection = document.getElementById('setup-section');
+        const leaderboardSection = document.getElementById('leaderboard-section');
+        const targetInput = document.getElementById('target-input');
+        const confirmBtn = document.getElementById('confirm-btn');
+        const endRoundBtn = document.getElementById('end-round-btn');
+        const targetInfo = document.getElementById('target-info');
+        const leaderboardList = document.getElementById('leaderboard-list');
+
+        let winnersListener = null;
+
+        // 確認送出題目
+        confirmBtn.addEventListener('click', () => {
+            const num = targetInput.value;
+            if (num.length < 1 || num.length > 20) {
+                alert("請輸入 1 到 20 位數字！");
+                return;
+            }
+
+            // 清除舊的排行榜，並寫入新遊戲狀態
+            remove(ref(db, 'winners')).then(() => {
+                set(ref(db, 'gameState'), {
+                    targetNumber: num,
+                    length: num.length,
+                    status: 'playing'
+                });
+
+                // 切換 UI
+                setupSection.classList.add('hidden');
+                leaderboardSection.classList.remove('hidden');
+                leaderboardSection.classList.add('flex');
+                endRoundBtn.classList.remove('hidden');
+                targetInfo.innerHTML = `目前題目：<span class="text-3xl text-yellow-300 font-bold ml-2">${num.length} 位數字</span>`;
+                
+                startListeningWinners();
+            });
+        });
+
+        // 結束回合
+        endRoundBtn.addEventListener('click', () => {
+            if(confirm("確定要結束這回合嗎？")) {
+                set(ref(db, 'gameState'), {
+                    targetNumber: "",
+                    length: 0,
+                    status: 'waiting'
+                });
+                
+                // 重置 UI
+                targetInput.value = "";
+                setupSection.classList.remove('hidden');
+                leaderboardSection.classList.add('hidden');
+                leaderboardSection.classList.remove('flex');
+                endRoundBtn.classList.add('hidden');
+                targetInfo.innerText = "等待主持人設定題目...";
+                leaderboardList.innerHTML = '<li class="text-gray-400 text-center text-xl mt-10">等待玩家破解密碼...</li>';
+            }
+        });
+
+        // 監聽排行榜
+        function startListeningWinners() {
+            const winnersRef = ref(db, 'winners');
+            onValue(winnersRef, (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    leaderboardList.innerHTML = "";
+                    // 轉為陣列並依照過關時間排序
+                    const winnersArray = Object.values(data).sort((a, b) => new Date(a.time) - new Date(b.time));
+                    
+                    winnersArray.forEach((winner, index) => {
+                        let rankIcon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `${index + 1}.`;
+                        let li = document.createElement('li');
+                        li.className = "flex items-center bg-gray-700 p-4 rounded-lg text-2xl animate-fade-in-up";
+                        li.innerHTML = `
+                            <span class="w-12 font-bold text-center mr-4">${rankIcon}</span>
+                            <span class="font-bold text-white flex-1">${winner.name}</span>
+                        `;
+                        leaderboardList.appendChild(li);
+                    });
+                } else {
+                    leaderboardList.innerHTML = '<li class="text-gray-400 text-center text-xl mt-10">等待玩家破解密碼...</li>';
+                }
+            });
+        }
+    </script>
+    <style>
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+            animation: fadeInUp 0.4s ease-out forwards;
+        }
+    </style>
+</body>
+</html>

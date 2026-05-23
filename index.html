@@ -119,8 +119,8 @@
                 const data = snapshot.val();
                 if (data) {
                     leaderboardList.innerHTML = "";
-                    // 轉為陣列並依照過關時間排序
-                    const winnersArray = Object.values(data).sort((a, b) => new Date(a.time) - new Date(b.time));
+                    // 轉為陣列並改為「依照嘗試次數排序」 (由少到多)
+                    const winnersArray = Object.values(data).sort((a, b) => a.guesses - b.guesses);
                     
                     winnersArray.forEach((winner, index) => {
                         let rankIcon = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `${index + 1}.`;
